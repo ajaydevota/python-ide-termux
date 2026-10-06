@@ -5,7 +5,6 @@ import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -13,30 +12,41 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Termux-style terminal: the transcript and the input are the SAME text area
+ * (like a real terminal), not a separate box.
+ */
 class TermuxActivity : AppCompatActivity() {
 
-    private val buf = StringBuilder()
-    private lateinit var termView: TextView
-    private lateinit var scroll: ScrollView
-    private lateinit var input: EditText
+    private lateinit var term: EditText
     private var busy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_termux)
 
-        termView = findViewById(R.id.termView)
-        scroll = findViewById(R.id.termScroll)
-        input = findViewById(R.id.cmdInput)
+        term = findViewById(R.id.termInput)
 
         findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
         findViewById<Button>(R.id.enterBtn).setOnClickListener { submit() }
 
-        input.setOnEditorActionListener { _, actionId, event ->
-            if (actionId == EditorInfo.IME_ACTION_SEND ||
-                (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER &&
-                        event.action == KeyEvent.ACTION_DOWN)
+        // IME "send" key (soft keyboard)
+        term.setOnEditorActionListener { _, actionId, event ->
+            val enterKey = event != null && event.keyCode == KeyEvent.KEYCODE_ENTER &&
+                    event.action == KeyEvent.ACTION_DOWN
+            if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE ||
+                actionId == EditorInfo.IME_ACTION_GO || enterKey
             ) {
+                submit()
+                true
+            } else {
+                false
+            }
+        }
+
+        // Hardware Enter
+        term.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_ENTER) {
                 submit()
                 true
             } else {
@@ -46,6 +56,7 @@ class TermuxActivity : AppCompatActivity() {
 
         write("Welcome to Termux (modified)\n")
         write("GUI editor bhi hai — Home se project khol kar code likh sakte ho.\n\n")
+        write("$ ")
 
         lifecycleScope.launch {
             val s = withContext(Dispatchers.Default) {
@@ -53,29 +64,35 @@ class TermuxActivity : AppCompatActivity() {
                     runOnUiThread { write(line + "\n") }
                 }
             }
-            write(s + "\n\n")
+            write(s + "\n\n$ ")
         }
     }
 
     private fun submit() {
         if (busy) return
-        val cmd = input.text.toString().trim()
-        if (cmd.isEmpty()) return
-        input.setText("")
-        write("$ " + cmd + "\n")
+        val full = term.text.toString()
+        val nl = full.lastIndexOf('\n')
+        var line = if (nl >= 0) full.substring(nl + 1) else full
+        if (line.startsWith("$ ")) line = line.substring(2)
+        val cmd = line.trim()
+
         busy = true
         lifecycleScope.launch {
-            val out = withContext(Dispatchers.Default) {
-                TermuxEnv.run(this@TermuxActivity, cmd)
+            write("\n")
+            if (cmd.isNotEmpty()) {
+                val out = withContext(Dispatchers.Default) {
+                    TermuxEnv.run(this@TermuxActivity, cmd)
+                }
+                write(out)
+                if (!out.endsWith("\n")) write("\n")
             }
-            write(if (out.endsWith("\n")) out else out + "\n")
+            write("$ ")
             busy = false
         }
     }
 
     private fun write(s: String) {
-        buf.append(s)
-        termView.text = buf.toString()
-        scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
+        term.append(s)
+        term.setSelection(term.text.length)
     }
 }
