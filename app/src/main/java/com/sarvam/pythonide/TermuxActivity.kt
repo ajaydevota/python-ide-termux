@@ -13,13 +13,38 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Termux-style terminal: the transcript and the input are the SAME text area
- * (like a real terminal), not a separate box.
+ * Termux-style terminal. Output is streamed live as the command runs.
  */
 class TermuxActivity : AppCompatActivity() {
 
     private lateinit var term: EditText
     private var busy = false
+
+    // Termux's own welcome message (motd)
+    private val welcome = """
+Welcome to Termux!
+
+Docs:       https://termux.dev/docs
+Donate:     https://termux.dev/donate
+Community:  https://termux.dev/community
+
+Working with packages:
+
+ - Search:  pkg search <query>
+ - Install: pkg install <package>
+ - Upgrade: pkg upgrade
+
+Subscribing to additional repositories:
+
+ - Root:    pkg install root-repo
+ - X11:     pkg install x11-repo
+
+For fixing any repository issues,
+try 'termux-change-repo' command.
+
+Report issues at https://termux.dev/issues
+
+""".trimIndent() + "\n"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,7 +55,6 @@ class TermuxActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
         findViewById<Button>(R.id.enterBtn).setOnClickListener { submit() }
 
-        // IME "send" key (soft keyboard)
         term.setOnEditorActionListener { _, actionId, event ->
             val enterKey = event != null && event.keyCode == KeyEvent.KEYCODE_ENTER &&
                     event.action == KeyEvent.ACTION_DOWN
@@ -43,8 +67,6 @@ class TermuxActivity : AppCompatActivity() {
                 false
             }
         }
-
-        // Hardware Enter
         term.setOnKeyListener { _, keyCode, event ->
             if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_ENTER) {
                 submit()
@@ -54,9 +76,7 @@ class TermuxActivity : AppCompatActivity() {
             }
         }
 
-        write("Welcome to Termux (modified)\n")
-        write("GUI editor bhi hai — Home se project khol kar code likh sakte ho.\n\n")
-        write("$ ")
+        write(welcome)
 
         lifecycleScope.launch {
             val s = withContext(Dispatchers.Default) {
@@ -77,16 +97,18 @@ class TermuxActivity : AppCompatActivity() {
         val cmd = line.trim()
 
         busy = true
+        write("\n")
         lifecycleScope.launch {
-            write("\n")
             if (cmd.isNotEmpty()) {
-                val out = withContext(Dispatchers.Default) {
-                    TermuxEnv.run(this@TermuxActivity, cmd)
+                // Stream output live
+                val code = withContext(Dispatchers.Default) {
+                    TermuxEnv.runStreaming(this@TermuxActivity, cmd) { chunk ->
+                        runOnUiThread { write(chunk) }
+                    }
                 }
-                write(out)
-                if (!out.endsWith("\n")) write("\n")
+                if (code != 0) write("[exit " + code + "]\n")
             }
-            write("$ ")
+            write("\n$ ")
             busy = false
         }
     }
