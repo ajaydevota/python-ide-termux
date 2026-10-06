@@ -6,6 +6,7 @@ import android.system.Os
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.TimeUnit
@@ -16,25 +17,24 @@ import java.util.zip.ZipInputStream
  *
  * applicationId is "com.termux", so context.filesDir is
  * /data/data/com.termux/files — exactly the prefix Termux binaries were built for.
+ *
+ * The bootstrap is bundled inside the APK (assets/termux/), so no download is needed.
  */
 object TermuxEnv {
 
     private const val BOOTSTRAP_TAG = "bootstrap-2026.10.04-r1%2Bapt.android-7"
-
-    // The bootstrap zip is ~33 MB; anything much smaller is a truncated/bad download.
     private const val MIN_VALID_SIZE = 30_000_000L
 
     fun prefix(context: Context) = File(context.filesDir, "usr")
     fun homeDir(context: Context) = File(context.filesDir, "home")
     private fun staging(context: Context) = File(context.filesDir, "usr-staging")
-    private fun zipFile(context: Context) = File(context.filesDir, "bootstrap.zip")
 
     fun arch(): String {
         val a = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
         return if (a.contains("x86_64")) "x86_64" else "aarch64"
     }
 
-    fun bootstrapUrl(): String =
+    private fun bootstrapUrl(): String =
         "https://github.com/termux/termux-packages/releases/download/" +
                 BOOTSTRAP_TAG + "/bootstrap-" + arch() + ".zip"
 
@@ -47,55 +47,66 @@ object TermuxEnv {
         }
     }
 
+    /** Opens the bundled bootstrap asset for this device's architecture. */
+    private fun openBundled(context: Context): InputStream? {
+        val candidates = listOf(
+            "termux/bootstrap-" + arch() + ".bin",
+            "termux/bootstrap-" + arch() + ".zip",
+            "termux/bootstrap-aarch64.bin"
+        )
+        for (n in candidates) {
+            try {
+                return context.assets.open(n)
+            } catch (ignored: Exception) {
+            }
+        }
+        return null
+    }
+
     @Synchronized
     fun ensureBootstrap(context: Context, onLog: (String) -> Unit): String {
         if (isInstalled(context)) return "Termux environment pehle se ready hai"
 
         val prefix = prefix(context)
         val staging = staging(context)
-        val zip = zipFile(context)
 
         try {
-            if (!zip.exists() || zip.length() < MIN_VALID_SIZE) {
-                onLog("Bootstrap download ho raha hai (~33 MB)…")
-                zip.delete()
-                download(bootstrapUrl(), zip, onLog)
-                onLog("Download poora hua: " + zip.length() / 1_000_000 + " MB")
-            } else {
-                onLog("Pehle se downloaded file mili: " + zip.length() / 1_000_000 + " MB")
-            }
-
             onLog("Extract ho raha hai…")
             staging.deleteRecursively()
             staging.mkdirs()
 
             val symlinks = ArrayList<Pair<String, String>>()
-            ZipInputStream(zip.inputStream().buffered()).use { zin ->
-                var e = zin.nextEntry
-                while (e != null) {
-                    val name = e.name
-                    if (name == "SYMLINKS.txt") {
-                        val txt = zin.bufferedReader().readText()
-                        txt.split("\n").forEach { line ->
-                            val parts = line.split("\u2190")
-                            if (parts.size == 2) symlinks.add(Pair(parts[0], parts[1]))
-                        }
-                    } else {
-                        val out = File(staging, name)
-                        if (e.isDirectory) {
-                            out.mkdirs()
+            val bundled = openBundled(context)
+            val input: InputStream = bundled ?: downloadToCache(context, onLog)
+
+            input.use { raw ->
+                ZipInputStream(raw.buffered()).use { zin ->
+                    var e = zin.nextEntry
+                    while (e != null) {
+                        val name = e.name
+                        if (name == "SYMLINKS.txt") {
+                            val txt = zin.bufferedReader().readText()
+                            txt.split("\n").forEach { line ->
+                                val parts = line.split("\u2190")
+                                if (parts.size == 2) symlinks.add(Pair(parts[0], parts[1]))
+                            }
                         } else {
-                            out.parentFile?.mkdirs()
-                            FileOutputStream(out).use { fos -> zin.copyTo(fos) }
-                            if (name.startsWith("bin/") || name.startsWith("libexec") ||
-                                name.startsWith("lib/apt/apt-helper") ||
-                                name.startsWith("lib/apt/methods")
-                            ) {
-                                chmodX(out)
+                            val out = File(staging, name)
+                            if (e.isDirectory) {
+                                out.mkdirs()
+                            } else {
+                                out.parentFile?.mkdirs()
+                                FileOutputStream(out).use { fos -> zin.copyTo(fos) }
+                                if (name.startsWith("bin/") || name.startsWith("libexec") ||
+                                    name.startsWith("lib/apt/apt-helper") ||
+                                    name.startsWith("lib/apt/methods")
+                                ) {
+                                    chmodX(out)
+                                }
                             }
                         }
+                        e = zin.nextEntry
                     }
-                    e = zin.nextEntry
                 }
             }
 
@@ -114,41 +125,35 @@ object TermuxEnv {
             if (!staging.renameTo(prefix)) throw IOException("staging move nahi hua")
             homeDir(context).mkdirs()
             File(prefix, "tmp").mkdirs()
-            zip.delete()
             onLog("Termux environment ready")
             return "OK: Termux environment install ho gaya"
         } catch (e: Exception) {
-            // Delete the bad zip so the next attempt downloads again.
-            zip.delete()
             staging.deleteRecursively()
-            return "ERROR: " + e.message + "  (dobara try karein — screen band karke phir kholo)"
+            return "ERROR: " + e.message
         }
     }
 
-    /** Downloads with size verification and up to 3 attempts. */
-    private fun download(url: String, dest: File, onLog: (String) -> Unit) {
+    /** Fallback: download the bootstrap if it was not bundled. */
+    private fun downloadToCache(context: Context, onLog: (String) -> Unit): InputStream {
+        val dest = File(context.filesDir, "bootstrap.zip")
         var last: Exception? = null
         for (attempt in 1..3) {
             try {
                 if (attempt > 1) onLog("Retry " + attempt + "/3…")
-                val conn = URL(url).openConnection() as HttpURLConnection
+                val conn = URL(bootstrapUrl()).openConnection() as HttpURLConnection
                 conn.instanceFollowRedirects = true
                 conn.connectTimeout = 60000
                 conn.readTimeout = 180000
                 conn.setRequestProperty("Accept-Encoding", "identity")
                 conn.setRequestProperty("User-Agent", "PythonIDE")
                 val expected = conn.contentLengthLong
-                conn.inputStream.use { input ->
-                    FileOutputStream(dest).use { out -> input.copyTo(out) }
+                conn.inputStream.use { inp ->
+                    FileOutputStream(dest).use { out -> inp.copyTo(out) }
                 }
                 val got = dest.length()
-                if (expected > 0 && got != expected) {
-                    throw IOException("size mismatch: got " + got + " expected " + expected)
-                }
-                if (got < MIN_VALID_SIZE) {
-                    throw IOException("file bahut chhoti hai (" + got + " bytes)")
-                }
-                return
+                if (expected > 0 && got != expected) throw IOException("size mismatch $got/$expected")
+                if (got < MIN_VALID_SIZE) throw IOException("file chhoti hai ($got)")
+                return dest.inputStream()
             } catch (e: Exception) {
                 last = e
                 dest.delete()
