@@ -5,6 +5,7 @@ import android.os.Build
 import android.system.Os
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.TimeUnit
@@ -13,18 +14,20 @@ import java.util.zip.ZipInputStream
 /**
  * Real Termux environment inside the app.
  *
- * The app's applicationId is "com.termux", so context.filesDir is
- * /data/data/com.termux/files — which is exactly the prefix Termux binaries
- * were compiled for. That is why no package rebuild is needed.
+ * applicationId is "com.termux", so context.filesDir is
+ * /data/data/com.termux/files — exactly the prefix Termux binaries were built for.
  */
 object TermuxEnv {
 
-    // Termux bootstrap release (apt-android-7 variant), published by termux-packages.
     private const val BOOTSTRAP_TAG = "bootstrap-2026.10.04-r1%2Bapt.android-7"
+
+    // The bootstrap zip is ~33 MB; anything much smaller is a truncated/bad download.
+    private const val MIN_VALID_SIZE = 30_000_000L
 
     fun prefix(context: Context) = File(context.filesDir, "usr")
     fun homeDir(context: Context) = File(context.filesDir, "home")
     private fun staging(context: Context) = File(context.filesDir, "usr-staging")
+    private fun zipFile(context: Context) = File(context.filesDir, "bootstrap.zip")
 
     fun arch(): String {
         val a = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
@@ -50,19 +53,24 @@ object TermuxEnv {
 
         val prefix = prefix(context)
         val staging = staging(context)
-        val zipFile = File(context.filesDir, "bootstrap.zip")
+        val zip = zipFile(context)
 
         try {
-            if (!zipFile.exists() || zipFile.length() < 1_000_000) {
+            if (!zip.exists() || zip.length() < MIN_VALID_SIZE) {
                 onLog("Bootstrap download ho raha hai (~33 MB)…")
-                download(bootstrapUrl(), zipFile)
+                zip.delete()
+                download(bootstrapUrl(), zip, onLog)
+                onLog("Download poora hua: " + zip.length() / 1_000_000 + " MB")
+            } else {
+                onLog("Pehle se downloaded file mili: " + zip.length() / 1_000_000 + " MB")
             }
+
             onLog("Extract ho raha hai…")
             staging.deleteRecursively()
             staging.mkdirs()
 
             val symlinks = ArrayList<Pair<String, String>>()
-            ZipInputStream(zipFile.inputStream().buffered()).use { zin ->
+            ZipInputStream(zip.inputStream().buffered()).use { zin ->
                 var e = zin.nextEntry
                 while (e != null) {
                     val name = e.name
@@ -103,24 +111,50 @@ object TermuxEnv {
             }
 
             prefix.deleteRecursively()
-            if (!staging.renameTo(prefix)) return "ERROR: staging move nahi hua"
+            if (!staging.renameTo(prefix)) throw IOException("staging move nahi hua")
             homeDir(context).mkdirs()
             File(prefix, "tmp").mkdirs()
+            zip.delete()
             onLog("Termux environment ready")
             return "OK: Termux environment install ho gaya"
         } catch (e: Exception) {
-            return "ERROR: " + e.message
+            // Delete the bad zip so the next attempt downloads again.
+            zip.delete()
+            staging.deleteRecursively()
+            return "ERROR: " + e.message + "  (dobara try karein — screen band karke phir kholo)"
         }
     }
 
-    private fun download(url: String, dest: File) {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.instanceFollowRedirects = true
-        conn.connectTimeout = 30000
-        conn.readTimeout = 180000
-        conn.inputStream.use { input ->
-            FileOutputStream(dest).use { out -> input.copyTo(out) }
+    /** Downloads with size verification and up to 3 attempts. */
+    private fun download(url: String, dest: File, onLog: (String) -> Unit) {
+        var last: Exception? = null
+        for (attempt in 1..3) {
+            try {
+                if (attempt > 1) onLog("Retry " + attempt + "/3…")
+                val conn = URL(url).openConnection() as HttpURLConnection
+                conn.instanceFollowRedirects = true
+                conn.connectTimeout = 60000
+                conn.readTimeout = 180000
+                conn.setRequestProperty("Accept-Encoding", "identity")
+                conn.setRequestProperty("User-Agent", "PythonIDE")
+                val expected = conn.contentLengthLong
+                conn.inputStream.use { input ->
+                    FileOutputStream(dest).use { out -> input.copyTo(out) }
+                }
+                val got = dest.length()
+                if (expected > 0 && got != expected) {
+                    throw IOException("size mismatch: got " + got + " expected " + expected)
+                }
+                if (got < MIN_VALID_SIZE) {
+                    throw IOException("file bahut chhoti hai (" + got + " bytes)")
+                }
+                return
+            } catch (e: Exception) {
+                last = e
+                dest.delete()
+            }
         }
+        throw last ?: IOException("download failed")
     }
 
     fun env(context: Context): Map<String, String> {
