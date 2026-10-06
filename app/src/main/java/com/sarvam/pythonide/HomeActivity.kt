@@ -46,30 +46,19 @@ class HomeActivity : AppCompatActivity() {
         emptyHint.visibility = if (projects.isEmpty()) View.VISIBLE else View.GONE
     }
 
+    /** Menu: only Settings and Termux. */
     private fun showMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
         popup.menu.add(0, 1, 0, "सेटिंग्स")
-        popup.menu.add(0, 2, 1, "पैकेज इंस्टॉल")
-        popup.menu.add(0, 4, 2, "Termux")
-        popup.menu.add(0, 3, 2, "ऐप के बारे में")
+        popup.menu.add(0, 2, 1, "Termux")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> startActivity(Intent(this, SettingsActivity::class.java))
-                2 -> startActivity(Intent(this, InstallActivity::class.java))
-                4 -> startActivity(Intent(this, TermuxActivity::class.java))
-                3 -> about()
+                2 -> startActivity(Intent(this, TermuxActivity::class.java))
             }
             true
         }
         popup.show()
-    }
-
-    private fun about() {
-        AlertDialog.Builder(this)
-            .setTitle("Python IDE")
-            .setMessage("ऑफ़लाइन पाइथन कोड एडिटर और रनर।\n\nEditor: Sora Editor\nRunner: Chaquopy (Python 3.12)")
-            .setPositiveButton("ठीक", null)
-            .show()
     }
 
     private fun newProject() {
