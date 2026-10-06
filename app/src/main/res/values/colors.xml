@@ -1,0 +1,12 @@
+<resources>
+    <color name="bg">#FF2E3440</color>
+    <color name="surface">#FF3B4252</color>
+    <color name="row_bg">#FF343B48</color>
+    <color name="accent">#FF88C0D0</color>
+    <color name="run">#FFA3BE8C</color>
+    <color name="ink">#FFD8DEE9</color>
+    <color name="ink_dim">#FFAEBACB</color>
+    <color name="console_bg">#FF20242C</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
