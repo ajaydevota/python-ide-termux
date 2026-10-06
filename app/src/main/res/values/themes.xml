@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.PythonIDE" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/surface</item>
+    </style>
+</resources>
