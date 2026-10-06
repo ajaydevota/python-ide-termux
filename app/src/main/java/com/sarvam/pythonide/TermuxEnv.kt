@@ -47,7 +47,6 @@ object TermuxEnv {
         }
     }
 
-    /** Opens the bundled bootstrap asset for this device's architecture. */
     private fun openBundled(context: Context): InputStream? {
         val candidates = listOf(
             "termux/bootstrap-" + arch() + ".bin",
@@ -133,7 +132,6 @@ object TermuxEnv {
         }
     }
 
-    /** Fallback: download the bootstrap if it was not bundled. */
     private fun downloadToCache(context: Context, onLog: (String) -> Unit): InputStream {
         val dest = File(context.filesDir, "bootstrap.zip")
         var last: Exception? = null
@@ -179,24 +177,41 @@ object TermuxEnv {
         return m
     }
 
-    fun run(context: Context, cmd: String, timeoutSec: Long = 240): String {
+    /** Runs a command and streams output live through [onChunk]. */
+    fun runStreaming(
+        context: Context,
+        cmd: String,
+        timeoutSec: Long = 900,
+        onChunk: (String) -> Unit
+    ): Int {
         val bash = File(prefix(context), "bin/bash")
-        if (!bash.exists()) return "ERROR: Termux bootstrap install nahi hua"
+        if (!bash.exists()) {
+            onChunk("ERROR: Termux bootstrap install nahi hua\n")
+            return -1
+        }
         val pb = ProcessBuilder(bash.absolutePath, "-l", "-c", cmd)
         pb.environment().putAll(env(context))
         pb.redirectErrorStream(true)
         return try {
             val p = pb.start()
-            val out = p.inputStream.bufferedReader().readText()
-            val done = p.waitFor(timeoutSec, TimeUnit.SECONDS)
-            if (!done) {
-                p.destroyForcibly()
-                out + "\n[timeout " + timeoutSec + "s]"
-            } else {
-                out
+            val reader = p.inputStream.reader()
+            val buf = CharArray(2048)
+            while (true) {
+                val n = reader.read(buf)
+                if (n < 0) break
+                onChunk(String(buf, 0, n))
             }
+            p.waitFor(timeoutSec, TimeUnit.SECONDS)
+            p.exitValue()
         } catch (e: Exception) {
-            "ERROR: " + e.message
+            onChunk("ERROR: " + e.message + "\n")
+            -1
         }
+    }
+
+    fun run(context: Context, cmd: String, timeoutSec: Long = 240): String {
+        val sb = StringBuilder()
+        runStreaming(context, cmd, timeoutSec) { sb.append(it) }
+        return sb.toString()
     }
 }
