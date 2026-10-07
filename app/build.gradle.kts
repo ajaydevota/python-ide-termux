@@ -54,6 +54,9 @@ chaquopy {
 }
 
 dependencies {
+    // Real Termux terminal (terminal-view + terminal-emulator, native PTY)
+    implementation("com.termux.termux-app:terminal-view:0.118.0")
+
     implementation(platform("io.github.rosemoe:editor-bom:0.24.4"))
     implementation("io.github.rosemoe:editor")
     implementation("io.github.rosemoe:language-textmate")
