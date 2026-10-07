@@ -145,20 +145,19 @@ class TermuxActivity : AppCompatActivity(), TerminalViewClient, TerminalSessionC
     override fun onBell(session: TerminalSession) {}
     override fun onColorsChanged(session: TerminalSession) {}
     override fun onTerminalCursorStateChange(state: Boolean) {}
-    override fun setTerminalShellPid(session: TerminalSession, pid: Int) {}
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("Termux", text))
     }
 
-    override fun onPasteTextFromClipboard(session: TerminalSession?) {
+    override fun onPasteTextFromClipboard(session: TerminalSession) {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = cm.primaryClip
         if (clip != null && clip.itemCount > 0) {
             val t = clip.getItemAt(0).coerceToText(this).toString()
             val b = t.toByteArray()
-            session?.write(b, 0, b.size)
+            session.write(b, 0, b.size)
         }
     }
 
