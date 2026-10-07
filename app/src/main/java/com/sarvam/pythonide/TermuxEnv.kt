@@ -64,7 +64,11 @@ object TermuxEnv {
 
     @Synchronized
     fun ensureBootstrap(context: Context, onLog: (String) -> Unit): String {
-        if (isInstalled(context)) return "Termux environment pehle se ready hai"
+        if (isInstalled(context)) {
+            // Make sure the `eg` command exists even on an already-installed environment.
+            installEgScript(prefix(context))
+            return "Termux environment pehle se ready hai"
+        }
 
         val prefix = prefix(context)
         val staging = staging(context)
