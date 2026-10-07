@@ -124,11 +124,38 @@ object TermuxEnv {
             if (!staging.renameTo(prefix)) throw IOException("staging move nahi hua")
             homeDir(context).mkdirs()
             File(prefix, "tmp").mkdirs()
+            installEgScript(prefix)
             onLog("Termux environment ready")
             return "OK: Termux environment install ho gaya"
         } catch (e: Exception) {
             staging.deleteRecursively()
             return "ERROR: " + e.message
+        }
+    }
+
+    /**
+     * Installs the `eg` command: `eg <filename>` opens our GUI editor.
+     * `nano` is left untouched.
+     */
+    private fun installEgScript(prefix: File) {
+        try {
+            val eg = File(prefix, "bin/eg")
+            val script = "#!/data/data/com.termux/files/usr/bin/sh\n" +
+                "if [ -z \"\$1\" ]; then\n" +
+                "  echo \"usage: eg <filename>    e.g. eg fast.py\"\n" +
+                "  exit 1\n" +
+                "fi\n" +
+                "case \"\$1\" in\n" +
+                "  /*) T=\"\$1\" ;;\n" +
+                "  *)  T=\"\$(pwd)/\$1\" ;;\n" +
+                "esac\n" +
+                "/system/bin/am start -n com.termux/com.sarvam.pythonide.EditorActivity --es file \"\$T\"\n"
+            eg.writeText(script)
+            try {
+                Os.chmod(eg.absolutePath, 493) // 0755
+            } catch (ignored: Exception) {
+            }
+        } catch (ignored: Exception) {
         }
     }
 
