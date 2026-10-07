@@ -36,9 +36,18 @@
             android:textSize="16sp" />
 
         <Button
+            android:id="@+id/saveButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="सेव"
+            android:textColor="@color/black"
+            android:backgroundTint="#FF88C0D0" />
+
+        <Button
             android:id="@+id/runButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
             android:text="&#9654; Run"
             android:textColor="@color/black"
             android:backgroundTint="@color/run" />
