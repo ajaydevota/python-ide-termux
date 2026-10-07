@@ -3,12 +3,15 @@ package com.sarvam.pythonide
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewTreeObserver
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -23,8 +26,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Real Termux terminal (terminal-view + terminal-emulator) with the Termux
- * extra-keys row, plus our GUI editor reachable from Home.
+ * Real Termux terminal. Launcher screen.
+ * `eg <filename>` (installed into $PREFIX/bin) opens the GUI editor.
  */
 class TermuxActivity : AppCompatActivity(), TerminalViewClient, TerminalSessionClient {
 
@@ -45,11 +48,10 @@ class TermuxActivity : AppCompatActivity(), TerminalViewClient, TerminalSessionC
         terminalView.setTextSize(20)
         terminalView.requestFocus()
 
-        findViewById<TextView>(R.id.backBtn).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.menuDots).setOnClickListener { showMenu(it) }
 
         buildExtraKeys()
 
-        // Create the session once the view has a real size.
         terminalView.viewTreeObserver.addOnGlobalLayoutListener(
             object : ViewTreeObserver.OnGlobalLayoutListener {
                 override fun onGlobalLayout() {
@@ -65,6 +67,20 @@ class TermuxActivity : AppCompatActivity(), TerminalViewClient, TerminalSessionC
                 }
             }
         )
+    }
+
+    private fun showMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add(0, 1, 0, "सेटिंग्स")
+        popup.menu.add(0, 2, 1, "Termux (reload)")
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> startActivity(Intent(this, SettingsActivity::class.java))
+                2 -> recreate()
+            }
+            true
+        }
+        popup.show()
     }
 
     private fun createSession() {
@@ -92,8 +108,8 @@ class TermuxActivity : AppCompatActivity(), TerminalViewClient, TerminalSessionC
             row.addView(b)
         }
         add("ESC") { sendKey("\u001b") }
-        add("CTRL") { ctrlDown = !ctrlDown; mark(row) }
-        add("ALT") { altDown = !altDown; mark(row) }
+        add("CTRL") { ctrlDown = !ctrlDown }
+        add("ALT") { altDown = !altDown }
         add("TAB") { sendKey("\t") }
         add("\u2190") { sendKey("\u001b[D") }
         add("\u2191") { sendKey("\u001b[A") }
@@ -103,10 +119,6 @@ class TermuxActivity : AppCompatActivity(), TerminalViewClient, TerminalSessionC
         add("/") { sendKey("/") }
         add("|") { sendKey("|") }
         add("~") { sendKey("~") }
-    }
-
-    private fun mark(row: LinearLayout) {
-        row.requestLayout()
     }
 
     private fun sendKey(s: String) {
